@@ -1,4 +1,4 @@
-module screenshotter
+module github.com/Simon-Peleska/screenshotter
 
 go 1.25.7
 
