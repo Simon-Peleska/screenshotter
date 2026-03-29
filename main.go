@@ -140,7 +140,7 @@ func pickOutput(outputs []*outputGeom, globalRegion *image.Rectangle) (uint32, *
 // minConfidence is the minimum per-word confidence (0–100) required to include
 // a word in the OCR output. Words below this threshold are dropped to avoid
 // garbage characters from images with no text or cut-off text.
-const minConfidence = 70.0
+const minConfidence = 45.0
 
 // runOCR encodes the image to PNG bytes and runs OCR via gosseract (CGO/libtesseract).
 // Only words with confidence >= minConfidence are included in the result.
