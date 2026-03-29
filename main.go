@@ -2,16 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"image"
 	"image/png"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +17,7 @@ import (
 )
 
 func main() {
-	regionFlag := flag.Bool("region", false, "select a region interactively using slurp (requires slurp in PATH)")
+	regionFlag := flag.Bool("region", false, "select a region interactively")
 	ocrFlag := flag.Bool("ocr", false, "run OCR on the screenshot and copy text to clipboard (requires libtesseract)")
 	outDir := flag.String("dir", screenshotDir(), "directory to save screenshots")
 	flag.Parse()
@@ -39,8 +37,8 @@ func main() {
 		log.Fatalf("get registry: %v", err)
 	}
 
-	// Gather global positions of all outputs so we can convert slurp's global
-	// coordinates to output-local coordinates for cropping.
+	// Gather global positions of all outputs so we can convert the selection's
+	// global coordinates to output-local coordinates for cropping.
 	outputs, err := gatherOutputGeoms(wl, reg)
 	if err != nil {
 		wl.close()
@@ -50,9 +48,12 @@ func main() {
 	// Region selection runs before we capture, because we need the geometry first.
 	var globalRegion *image.Rectangle
 	if *regionFlag {
-		r, err := selectRegion()
+		r, err := selectRegionWayland(outputs)
 		if err != nil {
 			wl.close()
+			if errors.Is(err, errCancelled) {
+				os.Exit(0)
+			}
 			log.Fatalf("region select: %v", err)
 		}
 		globalRegion = &r
@@ -112,47 +113,6 @@ func savePNG(img image.Image, path string) error {
 	}
 	defer f.Close()
 	return png.Encode(f, img)
-}
-
-// selectRegion runs slurp and parses the selected geometry.
-// slurp outputs a string like "100,200 800x600" or "100,200 800x600\n".
-func selectRegion() (image.Rectangle, error) {
-	out, err := exec.Command("slurp").Output()
-	if err != nil {
-		return image.Rectangle{}, fmt.Errorf("slurp: %w", err)
-	}
-	return parseGeometry(strings.TrimSpace(string(out)))
-}
-
-// parseGeometry parses a geometry string in the format "x,y WxH".
-// Coordinates may be floats (slurp outputs floats on HiDPI displays).
-func parseGeometry(s string) (image.Rectangle, error) {
-	// Expected format: "X,Y WxH"
-	parts := strings.Fields(s)
-	if len(parts) != 2 {
-		return image.Rectangle{}, fmt.Errorf("unexpected geometry format %q", s)
-	}
-	xy := strings.SplitN(parts[0], ",", 2)
-	wh := strings.SplitN(parts[1], "x", 2)
-	if len(xy) != 2 || len(wh) != 2 {
-		return image.Rectangle{}, fmt.Errorf("unexpected geometry format %q", s)
-	}
-	x, err1 := parseCoord(xy[0])
-	y, err2 := parseCoord(xy[1])
-	w, err3 := parseCoord(wh[0])
-	h, err4 := parseCoord(wh[1])
-	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
-		return image.Rectangle{}, fmt.Errorf("non-numeric values in geometry %q", s)
-	}
-	return image.Rect(x, y, x+w, y+h), nil
-}
-
-func parseCoord(s string) (int, error) {
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0, err
-	}
-	return int(math.Round(f)), nil
 }
 
 // pickOutput returns the output that best overlaps globalRegion (most overlap area),

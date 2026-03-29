@@ -73,7 +73,6 @@
               pkg-config
               tesseract
               leptonica
-              slurp
               delve
               mcp-dap-server
               go-test-tui.packages.${system}.default
@@ -84,7 +83,7 @@
               echo "  go build ./...          - build"
               echo "  go test ./...           - test"
               echo "  ./screenshotter         - fullscreen screenshot"
-              echo "  ./screenshotter -region - region screenshot (needs slurp)"
+              echo "  ./screenshotter -region - region screenshot"
               echo "  ./screenshotter -ocr    - OCR to clipboard"
             '';
           }
