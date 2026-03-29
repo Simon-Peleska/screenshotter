@@ -137,7 +137,13 @@ func pickOutput(outputs []*outputGeom, globalRegion *image.Rectangle) (uint32, *
 	return best.regName, &local
 }
 
+// minConfidence is the minimum per-word confidence (0–100) required to include
+// a word in the OCR output. Words below this threshold are dropped to avoid
+// garbage characters from images with no text or cut-off text.
+const minConfidence = 70.0
+
 // runOCR encodes the image to PNG bytes and runs OCR via gosseract (CGO/libtesseract).
+// Only words with confidence >= minConfidence are included in the result.
 func runOCR(img image.Image) (string, error) {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -151,9 +157,42 @@ func runOCR(img image.Image) (string, error) {
 		return "", fmt.Errorf("gosseract set image: %w", err)
 	}
 
-	text, err := client.Text()
+	boxes, err := client.GetBoundingBoxesVerbose()
 	if err != nil {
-		return "", fmt.Errorf("gosseract text: %w", err)
+		return "", fmt.Errorf("gosseract bounding boxes: %w", err)
 	}
-	return strings.TrimSpace(text), nil
+
+	// Reconstruct text line by line, skipping low-confidence words.
+	// GetBoundingBoxesVerbose returns words in reading order grouped by
+	// block/par/line numbers.
+	var lines []string
+	var currentLine []string
+	currentLineNum := -1
+	currentParNum := -1
+	currentBlockNum := -1
+
+	for _, box := range boxes {
+		if box.Word == "" {
+			continue
+		}
+		if box.Confidence < minConfidence {
+			continue
+		}
+		newLine := box.BlockNum != currentBlockNum || box.ParNum != currentParNum || box.LineNum != currentLineNum
+		if newLine {
+			if len(currentLine) > 0 {
+				lines = append(lines, strings.Join(currentLine, " "))
+			}
+			currentLine = nil
+			currentBlockNum = box.BlockNum
+			currentParNum = box.ParNum
+			currentLineNum = box.LineNum
+		}
+		currentLine = append(currentLine, box.Word)
+	}
+	if len(currentLine) > 0 {
+		lines = append(lines, strings.Join(currentLine, " "))
+	}
+
+	return strings.Join(lines, "\n"), nil
 }
