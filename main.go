@@ -86,6 +86,10 @@ func main() {
 		log.Fatalf("save: %v", err)
 	}
 	fmt.Println(outPath)
+
+	if err := setClipboardImage(img); err != nil {
+		log.Printf("clipboard: %v", err)
+	}
 }
 
 // screenshotDir returns the default screenshot save directory.

@@ -22,8 +22,10 @@ package main
 // (i.e. someone else owns the clipboard).
 
 import (
+	"bytes"
 	"fmt"
-	"io"
+	"image"
+	"image/png"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -31,11 +33,26 @@ import (
 
 const (
 	mimeTypePlain = "text/plain;charset=utf-8"
+	mimeTypePNG   = "image/png"
 )
 
-// setClipboard puts text into the Wayland clipboard using zwlr_data_control_manager_v1.
-// It blocks until the clipboard ownership is relinquished by another client taking it.
+// setClipboard puts text into the Wayland clipboard.
 func setClipboard(text string) error {
+	return setClipboardData(mimeTypePlain, []byte(text))
+}
+
+// setClipboardImage puts a PNG-encoded image into the Wayland clipboard.
+func setClipboardImage(img image.Image) error {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return fmt.Errorf("encode PNG for clipboard: %w", err)
+	}
+	return setClipboardData(mimeTypePNG, buf.Bytes())
+}
+
+// setClipboardData puts arbitrary data into the Wayland clipboard using
+// zwlr_data_control_manager_v1. It blocks until another client takes ownership.
+func setClipboardData(mimeType string, data []byte) error {
 	wl, err := connect()
 	if err != nil {
 		return err
@@ -90,12 +107,12 @@ func setClipboard(text string) error {
 			return fmt.Errorf("create_data_source: %w", err)
 		}
 	}
-	source := &dataControlSource{text: text}
+	source := &dataControlSource{data: data}
 	wl.register(sourceID, source)
 
 	// --- source.offer(mime) — opcode 0 on source ---
 	{
-		args := encodeString(mimeTypePlain)
+		args := encodeString(mimeType)
 		if err := wl.send(sourceID, 0, args, -1); err != nil {
 			return fmt.Errorf("source.offer: %w", err)
 		}
@@ -115,7 +132,6 @@ func setClipboard(text string) error {
 	}
 
 	// --- Serve send events until pasted or cancelled ---
-	// Exit after the first paste so the process doesn't hang indefinitely.
 	for !source.cancelled {
 		if err := wl.recv(); err != nil {
 			// Connection closed — clipboard is gone.
@@ -146,9 +162,8 @@ func (d *dataControlDevice) dispatch(_ uint16, data []byte, fd int) {
 //	0: send(mime_type string, fd fd)  — write data to fd
 //	1: cancelled                       — source is no longer the selection
 type dataControlSource struct {
-	text      string
+	data      []byte
 	cancelled bool
-	sent      bool
 }
 
 func (s *dataControlSource) dispatch(opcode uint16, data []byte, fd int) {
@@ -158,7 +173,7 @@ func (s *dataControlSource) dispatch(opcode uint16, data []byte, fd int) {
 			return
 		}
 		f := os.NewFile(uintptr(fd), "clipboard-pipe")
-		io.WriteString(f, s.text)
+		f.Write(s.data)
 		f.Close()
 	case 1: // cancelled
 		s.cancelled = true
